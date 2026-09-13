@@ -1,0 +1,693 @@
+// Tutoring platform — Prisma schema (Phase 1: full domain model).
+//
+// Conventions (see the build prompt's golden rules):
+//  - Money is stored as integer minor units (kopiykas). `currency` is a separate
+//    field. Never float.
+//  - Every status field is an enum and is paired with explicit timestamps
+//    (completedAt / paidAt / cancelledAt / ...) so historical stats can always
+//    be reconstructed.
+//  - Multi-tenant-ready: every domain row carries `teacherId` — the owning
+//    teacher IS the tenant while the product is single-tenant. Queries must
+//    always filter by it; no endpoint returns another teacher's data.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===========================================================================
+// Enums
+// ===========================================================================
+
+/// TEACHER owns a workspace (tenant). STUDENT belongs to a teacher's tenant.
+/// ADMIN is reserved for the future multi-tenant SaaS control plane.
+enum UserRole {
+  TEACHER
+  STUDENT
+  ADMIN
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum LessonStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AssignmentSourceType {
+  WHITEBOARD
+  PAGE
+  MANUAL
+}
+
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+  REVIEWING
+  REVIEWED
+  LATE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  FAILED
+  REFUNDED
+}
+
+/// Named "...Kind" so it does not collide with the TS `PaymentProvider`
+/// interface (the common contract over LiqPay/Monobank) added in Phase 7.
+enum PaymentProviderKind {
+  LIQPAY
+  MONOBANK
+}
+
+enum PaymentReminderKind {
+  UPCOMING
+  DUE_TODAY
+  OVERDUE
+}
+
+enum CalendarSyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+  DELETED
+}
+
+enum NotificationType {
+  LESSON_REMINDER
+  LESSON_CANCELLED
+  LESSON_RESCHEDULED
+  ASSIGNMENT_DUE
+  AI_REVIEW_READY
+  PAYMENT_UPCOMING
+  PAYMENT_DUE
+  PAYMENT_OVERDUE
+  PAYMENT_RECEIVED
+  INVITATION
+  GENERIC
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WEB_PUSH
+}
+
+enum ChatSenderType {
+  TEACHER
+  STUDENT
+  AI
+}
+
+// ===========================================================================
+// Users, auth, invitations
+// ===========================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  role          UserRole  @default(STUDENT)
+  email         String    @unique
+  emailVerified DateTime?
+  name          String?
+  image         String?
+  /// bcrypt hash. Null for OAuth-only accounts.
+  passwordHash  String?
+  /// IANA timezone — used for scheduling and notification delivery windows.
+  timezone      String    @default("Europe/Kyiv")
+  isActive      Boolean   @default(true)
+  /// STUDENT only: false for a "manual" student a teacher tracks for
+  /// bookkeeping only — added without an invitation, so no login, no chat,
+  /// no reminders. Flips to true if they later accept an invitation.
+  isRegistered  Boolean   @default(true)
+
+  /// TEACHER only: a permanent meeting-room URL (e.g. a personal Zoom link)
+  /// used as the default `Lesson.meetLink` for new lessons.
+  defaultMeetingUrl String?
+
+  /// Multi-tenant-ready tenant pointer. For a STUDENT this is their teacher's
+  /// id; for a TEACHER it equals their own id (set right after creation).
+  tenantId      String?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Auth.js adapter relations
+  accounts Account[]
+  sessions Session[]
+
+  // Domain relations
+  lessonsAsTeacher   Lesson[]      @relation("LessonTeacher")
+  lessonsAsStudent   Lesson[]      @relation("LessonStudent")
+  ownedPages         Page[]        @relation("PageOwner")
+  submissions        Submission[]
+  chatMessages       ChatMessage[]
+  notifications      Notification[]
+  invoicesAsStudent  Invoice[]     @relation("InvoiceStudent")
+  paymentsAsTeacher  Payment[]     @relation("PaymentTeacher")
+  paymentsAsStudent  Payment[]     @relation("PaymentStudent")
+  invitationsCreated Invitation[]  @relation("InvitationCreatedBy")
+  dailyStats         DailyStats[]
+  googleIntegration  GoogleIntegration?
+  pushSubscriptions  PushSubscription[]
+
+  @@index([tenantId])
+  @@index([role])
+}
+
+/// Student onboarding: a teacher issues an invitation; the raw token travels
+/// only in the link, the DB stores its SHA-256 hash.
+model Invitation {
+  id           String           @id @default(cuid())
+  teacherId    String
+  email        String
+  role         UserRole         @default(STUDENT)
+  tokenHash    String           @unique
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  acceptedById String?
+  revokedAt    DateTime?
+
+  createdById String
+  createdBy   User   @relation("InvitationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teacherId])
+  @@index([email])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Auth.js (NextAuth) adapter models — https://authjs.dev/getting-started/adapters
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                       String  @id @default(cuid())
+  userId                   String
+  type                     String
+  provider                 String
+  providerAccountId        String
+  refresh_token            String?
+  access_token             String?
+  expires_at               Int?
+  token_type               String?
+  scope                    String?
+  id_token                 String?
+  session_state            String?
+  refresh_token_expires_in Int?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ===========================================================================
+// Lessons, whiteboard, pages, assignments
+// ===========================================================================
+
+model Lesson {
+  id                 String       @id @default(cuid())
+  teacherId          String
+  studentId          String
+  subject            String
+  scheduledStart     DateTime
+  scheduledEnd       DateTime
+  status             LessonStatus @default(SCHEDULED)
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancellationReason String?
+  meetLink           String?
+  calendarEventId    String?
+  /// Price for this lesson in minor units (kopiykas).
+  price              Int          @default(0)
+  currency           String       @default("UAH")
+  notes              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teacher User @relation("LessonTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  student User @relation("LessonStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  whiteboard    Whiteboard?
+  pages         Page[]
+  assignments   Assignment[]
+  submissions   Submission[]
+  chatMessages  ChatMessage[]
+  calendarEvent CalendarEvent?
+  payments      Payment[]
+  invoiceItems  InvoiceItem[]
+
+  @@index([teacherId, scheduledStart])
+  @@index([studentId, scheduledStart])
+  @@index([status])
+  // Retrospective stats: completed lessons per teacher over a period.
+  @@index([teacherId, status, completedAt])
+}
+
+model Whiteboard {
+  id        String   @id @default(cuid())
+  lessonId  String   @unique
+  teacherId String
+  /// tldraw scene snapshot.
+  sceneJson Json     @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+}
+
+model Page {
+  id          String  @id @default(cuid())
+  teacherId   String
+  lessonId    String?
+  ownerId     String?
+  title       String  @default("Untitled")
+  /// TipTap document JSON.
+  contentJson Json    @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lesson Lesson? @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  owner  User?   @relation("PageOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  sourcedAssignments Assignment[] @relation("AssignmentSourcePage")
+
+  @@index([teacherId])
+  @@index([lessonId])
+  @@index([ownerId])
+}
+
+model Assignment {
+  id           String               @id @default(cuid())
+  teacherId    String
+  lessonId     String?
+  studentId    String?
+  title        String
+  description  String
+  sourceType   AssignmentSourceType @default(MANUAL)
+  sourcePageId String?
+  dueAt        DateTime?
+  /// Set when the assignment was produced by the Phase 4 AI generator.
+  aiModel      String?
+  aiPrompt     String?
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lesson     Lesson? @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  sourcePage Page?   @relation("AssignmentSourcePage", fields: [sourcePageId], references: [id], onDelete: SetNull)
+
+  submissions Submission[]
+
+  @@index([teacherId])
+  @@index([lessonId])
+  @@index([studentId])
+  @@index([dueAt])
+}
+
+model Submission {
+  id           String           @id @default(cuid())
+  assignmentId String
+  teacherId    String
+  studentId    String
+  lessonId     String?
+  text         String?
+  fileUrl      String?
+  fileType     String?
+  status       SubmissionStatus @default(SUBMITTED)
+  submittedAt  DateTime         @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignment Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student    User       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  lesson     Lesson?    @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+
+  review AIReview?
+
+  @@index([assignmentId])
+  @@index([studentId])
+  @@index([teacherId])
+  @@index([status])
+}
+
+/// Structured AI homework review. `errorsJson` is validated with Zod before it
+/// is written: array of { location, type, explanation, severity }.
+model AIReview {
+  id           String   @id @default(cuid())
+  submissionId String   @unique
+  teacherId    String
+  errorsJson   Json
+  score        Int?
+  summary      String
+  model        String
+  promptTokens Int?
+  outputTokens Int?
+  rawJson      Json?
+
+  createdAt DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+  @@index([createdAt])
+}
+
+// ===========================================================================
+// Billing: invoices, payments, reminders
+// ===========================================================================
+
+model Invoice {
+  id          String        @id @default(cuid())
+  teacherId   String
+  studentId   String
+  /// Human-facing invoice number, unique per deployment.
+  number      String        @unique
+  status      InvoiceStatus @default(OPEN)
+  /// Sum of item amounts, minor units. Denormalized for fast listing.
+  totalAmount Int           @default(0)
+  currency    String        @default("UAH")
+  issuedAt    DateTime      @default(now())
+  dueAt       DateTime?
+  paidAt      DateTime?
+  voidedAt    DateTime?
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student  User          @relation("InvoiceStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@index([teacherId, status])
+  @@index([studentId])
+  @@index([dueAt])
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  lessonId    String?
+  description String
+  quantity    Int     @default(1)
+  /// Per-unit price, minor units.
+  unitAmount  Int
+  /// quantity * unitAmount, minor units. Denormalized.
+  amount      Int
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lesson  Lesson? @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@index([lessonId])
+}
+
+model Payment {
+  id                    String               @id @default(cuid())
+  teacherId             String
+  studentId             String
+  lessonId              String?
+  invoiceId             String?
+  /// Amount in minor units (kopiykas).
+  amount                Int
+  currency              String               @default("UAH")
+  status                PaymentStatus        @default(PENDING)
+  provider              PaymentProviderKind?
+  /// Unique across providers — the dedupe key for idempotent webhooks.
+  providerTransactionId String?              @unique
+  providerRawJson       Json?
+  description           String?
+  dueAt                 DateTime?
+  paidAt                DateTime?
+  failedAt              DateTime?
+  refundedAt            DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  teacher       User                  @relation("PaymentTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  student       User                  @relation("PaymentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  lesson        Lesson?               @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  invoice       Invoice?              @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  reminders     PaymentReminder[]
+  webhookEvents PaymentWebhookEvent[]
+
+  @@index([teacherId, status])
+  @@index([studentId])
+  @@index([lessonId])
+  @@index([invoiceId])
+  @@index([dueAt])
+  // Retrospective revenue stats.
+  @@index([status, paidAt])
+}
+
+/// Idempotency ledger for payment webhooks (golden rule 4). A provider may
+/// deliver the same event many times; we record it once and dedupe on
+/// (provider, providerEventId).
+model PaymentWebhookEvent {
+  id                    String              @id @default(cuid())
+  provider              PaymentProviderKind
+  providerEventId       String
+  providerTransactionId String?
+  paymentId             String?
+  payloadJson           Json
+  processedAt           DateTime?
+  error                 String?
+
+  createdAt DateTime @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerEventId])
+  @@index([providerTransactionId])
+  @@index([paymentId])
+}
+
+model PaymentReminder {
+  id          String              @id @default(cuid())
+  paymentId   String
+  teacherId   String
+  kind        PaymentReminderKind @default(UPCOMING)
+  channel     NotificationChannel @default(EMAIL)
+  scheduledAt DateTime
+  sentAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([scheduledAt, sentAt])
+}
+
+// ===========================================================================
+// Calendar, notifications, chat
+// ===========================================================================
+
+/// Per-user Google OAuth connection for two-way Calendar sync (Phase 2).
+/// Separate from Auth.js `Account` because calendar access is an integration,
+/// not a login method.
+model GoogleIntegration {
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  googleUserId      String?
+  email             String?
+  accessToken       String
+  refreshToken      String
+  scope             String
+  tokenType         String    @default("Bearer")
+  expiryDate        DateTime
+  calendarId        String    @default("primary")
+  syncToken         String?
+  channelId         String?
+  channelResourceId String?
+  channelExpiration DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CalendarEvent {
+  id               String             @id @default(cuid())
+  lessonId         String             @unique
+  teacherId        String
+  googleEventId    String?
+  googleCalendarId String?
+  htmlLink         String?
+  hangoutLink      String?
+  syncStatus       CalendarSyncStatus @default(PENDING)
+  lastSyncedAt     DateTime?
+  syncError        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@index([teacherId])
+  @@index([syncStatus])
+  @@index([googleEventId])
+}
+
+model Notification {
+  id          String              @id @default(cuid())
+  userId      String
+  teacherId   String
+  type        NotificationType
+  title       String
+  body        String?
+  payloadJson Json?
+  channel     NotificationChannel @default(IN_APP)
+  /// Optional idempotency key so repeated jobs don't double-send.
+  dedupeKey   String?
+  readAt      DateTime?
+  sentAt      DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt])
+  @@index([teacherId])
+  @@index([type])
+}
+
+model PushSubscription {
+  id        String  @id @default(cuid())
+  userId    String
+  endpoint  String  @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ChatMessage {
+  id           String         @id @default(cuid())
+  lessonId     String
+  teacherId    String
+  /// Null when senderType = AI.
+  senderId     String?
+  senderType   ChatSenderType
+  content      String
+  metadataJson Json?
+
+  createdAt DateTime @default(now())
+
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  sender User?  @relation(fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([lessonId, createdAt])
+  @@index([teacherId])
+}
+
+// ===========================================================================
+// Stats (Phase 9) — denormalized, filled by a nightly job.
+// ===========================================================================
+
+model DailyStats {
+  id                  String   @id @default(cuid())
+  teacherId           String
+  date                DateTime @db.Date
+  lessonsScheduled    Int      @default(0)
+  lessonsCompleted    Int      @default(0)
+  lessonsCancelled    Int      @default(0)
+  lessonsNoShow       Int      @default(0)
+  /// Collected revenue (sum of payments paid that day), minor units.
+  revenue             Int      @default(0)
+  /// Invoiced that day, minor units.
+  invoiced            Int      @default(0)
+  /// Outstanding (unpaid, past due) as of that day, minor units.
+  outstanding         Int      @default(0)
+  newStudents         Int      @default(0)
+  activeStudents      Int      @default(0)
+  submissionsReviewed Int      @default(0)
+  currency            String   @default("UAH")
+  computedAt          DateTime @default(now())
+
+  teacher User @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, date])
+  @@index([date])
+}
+
+/// Typical-mistake analytics: count of each AI error `type` per day.
+model DailyErrorStat {
+  id        String   @id @default(cuid())
+  teacherId String
+  date      DateTime @db.Date
+  errorType String
+  count     Int      @default(0)
+
+  computedAt DateTime @default(now())
+
+  @@unique([teacherId, date, errorType])
+  @@index([teacherId, date])
+}
