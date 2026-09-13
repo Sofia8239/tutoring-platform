@@ -1,3 +1,25 @@
 allowBuilds:
+  "@prisma/engines": true
+  "@prisma/client": true
+  prisma: true
+  esbuild: true
+  msgpackr-extract: true
+  workerd: true
   sharp: false
   unrs-resolver: false
+  puppeteer: true
+  '@google/genai': false
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - '@tldraw/driver@5.4.1'
+  - '@tldraw/editor@5.4.1'
+  - tldraw@5.4.1
+  - openai@7.13.0
+  - '@tldraw/sync@5.4.1'
+  - '@tldraw/sync-core@5.4.1'
+  - '@tldraw/store@5.4.1'
+  - '@tldraw/tlschema@5.4.1'
+  - '@tldraw/state@5.4.1'
+  - '@tldraw/state-react@5.4.1'
+  - '@tldraw/utils@5.4.1'
+  - '@tldraw/validate@5.4.1'

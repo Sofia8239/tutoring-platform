@@ -1,36 +1,90 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Tutoring Platform
 
-## Getting Started
+SaaS workspace for online tutoring. Single-tenant today, multi-tenant-ready by
+design (every domain row is scoped to a `tenantId` / `teacherId`).
 
-First, run the development server:
+## Stack
+
+| Area       | Choice                                                        |
+| ---------- | ------------------------------------------------------------- |
+| Framework  | Next.js 16 (App Router) + TypeScript + Tailwind CSS v4       |
+| Database   | PostgreSQL + Prisma 7 (`prisma-client` generator, pg adapter) |
+| Auth       | Auth.js (NextAuth v5), JWT sessions, role-based              |
+| Files      | Cloudflare R2 (S3 API) — Phase 5                             |
+| Queues     | BullMQ + Redis — Phase 2                                     |
+| AI         | Anthropic Claude API — Phase 4/5                             |
+| Payments   | LiqPay + Monobank behind one `PaymentProvider` — Phase 7     |
+| Email      | Resend — Phase 2                                             |
+| Tests      | Vitest                                                        |
+
+## Prerequisites
+
+- Node.js 20.19+ / 22.12+ / 24+ (Turbopack + Prisma 7 requirement)
+- pnpm (`corepack enable pnpm`)
+- Docker (for local Postgres + Redis) — or your own Postgres 17 / Redis 7
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install                 # also runs `prisma generate` (postinstall)
+cp .env.example .env          # then set AUTH_SECRET:
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+docker compose up -d          # Postgres :5432, Redis :6379
+pnpm db:migrate               # create/apply migrations (Phase 1 adds the schema)
+
+pnpm dev                      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sanity checks:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `curl localhost:3000/api/health` → `{"status":"ok","db":"up",...}`
+- `curl localhost:3000/api/auth/providers` → `{}` (no providers until Phase 1)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
+| Script               | What it does                              |
+| -------------------- | ---------------------------------------- |
+| `pnpm dev`           | Dev server (Turbopack)                   |
+| `pnpm build`         | Production build                         |
+| `pnpm start`         | Serve the production build               |
+| `pnpm typecheck`     | `tsc --noEmit`                           |
+| `pnpm lint`          | ESLint                                   |
+| `pnpm format`        | Prettier write                          |
+| `pnpm test`          | Vitest (run once)                        |
+| `pnpm test:watch`    | Vitest watch                            |
+| `pnpm db:migrate`    | `prisma migrate dev`                     |
+| `pnpm db:studio`     | Prisma Studio                           |
+| `pnpm db:reset`      | Drop + re-apply migrations + seed        |
+| `pnpm db:seed`       | Run `prisma/seed.ts` (added in Phase 1)  |
 
-To learn more about Next.js, take a look at the following resources:
+## Project structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+prisma/
+  schema.prisma        # models (Phase 0: auth + User only)
+prisma.config.ts       # Prisma 7 config (DB URL for the CLI lives here)
+src/
+  app/                 # App Router routes
+    api/health/        # liveness + DB probe
+    api/auth/[...nextauth]/
+  lib/                 # env (zod-validated), prisma singleton, auth config
+  server/              # framework-agnostic business logic (Phase 1+)
+  components/          # UI (Phase 1+)
+  jobs/                # BullMQ workers/queues (Phase 2+)
+  types/               # shared types + module augmentation
+  generated/prisma/    # generated client (git-ignored)
+tests/                 # Vitest (unit / integration)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Conventions (see the build prompt's "golden rules")
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Money is stored as **integer minor units** (kopiykas); currency is a separate
+  field; never `float`.
+- Status fields are enums with explicit timestamps (`completedAt`, `paidAt`,
+  `cancelledAt`) so historical stats are reconstructable.
+- Payment webhooks are **idempotent** — dedupe on `providerTransactionId`.
+- AI responses are **structured JSON validated with Zod**, never free-text
+  parsing.
+- Secrets only in env. `src/lib/env.ts` validates them at boot.
+- Every query is scoped by owner; no endpoint returns another tenant's data.
