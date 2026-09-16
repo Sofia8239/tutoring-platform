@@ -100,22 +100,22 @@ export function layoutDayLessons(
 }
 
 /**
- * Visible hour band for the grid: the tightest whole-hour range that holds
- * every lesson, padded by an hour and clamped to a sane window. Falls back to
- * a plain workday when there are no lessons.
+ * The hour the grid should open scrolled to: an hour before the earliest
+ * lesson of the visible week, or before "now" if today is in it and there
+ * are no lessons yet, or a plain mid-morning default. The grid itself always
+ * spans the full 00:00-24:00 day — this only picks where it opens.
  */
-export function gridHourRange(
+export function initialScrollHour(
   lessons: Array<{ startMin: number; endMin: number }>,
-  { min = 6, max = 23, fallback = [8, 20] as [number, number] } = {},
-): [number, number] {
-  if (lessons.length === 0) return fallback;
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const l of lessons) {
-    lo = Math.min(lo, l.startMin);
-    hi = Math.max(hi, l.endMin);
+  nowMinutes: number | null,
+  fallbackHour = 8,
+): number {
+  if (lessons.length > 0) {
+    const earliest = Math.min(...lessons.map((l) => l.startMin));
+    return Math.max(0, Math.floor(earliest / 60) - 1);
   }
-  const startHour = Math.max(min, Math.floor(lo / 60) - 1);
-  const endHour = Math.min(max, Math.ceil(hi / 60) + 1);
-  return [Math.min(startHour, fallback[0]), Math.max(endHour, fallback[1])];
+  if (nowMinutes !== null) {
+    return Math.max(0, Math.floor(nowMinutes / 60) - 1);
+  }
+  return fallbackHour;
 }

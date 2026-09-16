@@ -20,6 +20,7 @@
     "db:studio": "prisma studio",
     "worker": "tsx src/jobs/worker.ts",
     "worker:scan": "tsx src/jobs/scan.ts",
+    "stats:backfill": "tsx src/jobs/backfill-stats.ts",
     "whiteboard-sync": "tsx src/jobs/whiteboard-sync-server.ts",
     "postinstall": "prisma generate"
   },

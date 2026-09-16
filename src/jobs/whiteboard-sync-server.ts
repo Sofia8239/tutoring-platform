@@ -19,6 +19,7 @@ import {
   verifyWhiteboardTicket,
   type WhiteboardRole,
 } from "@/server/whiteboard-sync/ticket";
+import { resolveIsReadonly } from "@/lib/whiteboard-permission";
 import type { Prisma } from "@/generated/prisma/client";
 
 /**
@@ -151,11 +152,78 @@ async function getOrCreateRoom(lessonId: string): Promise<RoomEntry | null> {
   return entry;
 }
 
+/**
+ * Fresh per-connect read of the teacher's toggle — deliberately NOT cached
+ * on `RoomEntry` (which may have been created long before this connect) and
+ * NOT trusted from the ticket. This is the actual value fed into
+ * `resolveIsReadonly` for every new student session.
+ */
+async function getStudentCanEdit(lessonId: string): Promise<boolean> {
+  const whiteboard = await prisma.whiteboard.findUnique({
+    where: { lessonId },
+    select: { studentCanEdit: true },
+  });
+  return whiteboard?.studentCanEdit ?? true;
+}
+
+/** Drop every currently-connected student session in a lesson's room (if any
+ *  is open). They reconnect automatically and pick up the fresh
+ *  `studentCanEdit` value on the way back in. */
+function kickStudentSessions(lessonId: string): void {
+  const entry = rooms.get(lessonId);
+  if (!entry) return; // nobody connected — nothing to kick, next connect reads fresh anyway
+  for (const session of entry.room.getSessions()) {
+    if (session.meta.role === "student") {
+      entry.room.closeSession(session.sessionId);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HTTP + WebSocket upgrade
 // ---------------------------------------------------------------------------
 
-const httpServer = createServer((_req, res) => {
+function readJsonBody(
+  req: import("node:http").IncomingMessage,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      try {
+        resolve(
+          chunks.length
+            ? JSON.parse(Buffer.concat(chunks).toString("utf8"))
+            : {},
+        );
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+const httpServer = createServer((req, res) => {
+  // Internal-only: called by the Next.js app (same host) right after it
+  // persists a `studentCanEdit` change, never by a browser. Gated by a
+  // shared secret, not exposed in any client bundle.
+  if (req.method === "POST" && req.url === "/internal/kick-student") {
+    const secret = env.WHITEBOARD_SYNC_SECRET ?? env.AUTH_SECRET;
+    if (req.headers["x-internal-secret"] !== secret) {
+      res.writeHead(401).end();
+      return;
+    }
+    void readJsonBody(req)
+      .then((body) => {
+        const lessonId = (body as { lessonId?: unknown }).lessonId;
+        if (typeof lessonId === "string") kickStudentSessions(lessonId);
+        res.writeHead(204).end();
+      })
+      .catch(() => res.writeHead(400).end());
+    return;
+  }
+
   res.writeHead(200, { "content-type": "text/plain" });
   res.end("whiteboard-sync ok");
 });
@@ -181,27 +249,51 @@ httpServer.on("upgrade", (req, socket, head) => {
     return;
   }
 
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    void (async () => {
-      const entry = await getOrCreateRoom(lessonId);
-      if (!entry) {
-        ws.close(4404, "Lesson not found");
-        return;
-      }
+  // Resolve the room BEFORE completing the WS handshake, not after: the
+  // client sends its `connect` message the instant the socket opens, and
+  // `TLSocketRoom` only starts listening for messages inside
+  // `handleSocketConnect`. Awaiting the DB lookup *after* `handleUpgrade`
+  // leaves a window where that first (and only) `connect` message arrives
+  // with nobody listening yet and is silently dropped — the client then
+  // waits forever for a reply that was never coming. Doing the lookup first
+  // means `handleSocketConnect` runs synchronously right as the socket opens.
+  void (async () => {
+    let entry: RoomEntry | null;
+    let studentCanEdit = true;
+    try {
+      // Teacher connections never need this lookup (always editable), so
+      // only fetch it for a student — and always fresh, never from the room
+      // entry, which may have been created long before this connect.
+      [entry, studentCanEdit] = await Promise.all([
+        getOrCreateRoom(lessonId),
+        payload.role === "student" ? getStudentCanEdit(lessonId) : true,
+      ]);
+    } catch (error) {
+      console.error(`[whiteboard-sync] ${lessonId}: room lookup failed`, error);
+      socket.destroy();
+      return;
+    }
+    if (!entry) {
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
       entry.room.handleSocketConnect({
         sessionId,
         socket: ws as unknown as WebSocketMinimal,
-        // Part 1: everyone connected can edit. Part 2 will look up
-        // Whiteboard.studentCanEdit here for `role === "student"`.
-        isReadonly: false,
+        // The actual enforcement: a session opened with isReadonly:true
+        // cannot push document changes, independent of what the client's
+        // own UI does or fakes locally.
+        isReadonly: resolveIsReadonly(payload.role, studentCanEdit),
         meta: {
           userId: payload.userId,
           role: payload.role,
           name: payload.name,
         },
       });
-    })();
-  });
+    });
+  })();
 });
 
 httpServer.listen(env.WHITEBOARD_SYNC_PORT, () => {

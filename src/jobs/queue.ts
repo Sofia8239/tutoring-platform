@@ -4,7 +4,10 @@ import { redisConnection } from "@/jobs/redis";
 
 export const REMINDERS_QUEUE = "reminders";
 
-export type ReminderJobName = "scan-lessons" | "scan-payments";
+export type ReminderJobName =
+  | "scan-lessons"
+  | "scan-payments"
+  | "recompute-daily-stats";
 
 export const remindersQueue = new Queue(REMINDERS_QUEUE, {
   connection: redisConnection,

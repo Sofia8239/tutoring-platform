@@ -44,6 +44,53 @@ export function fillDailySeries(
   return points;
 }
 
+export function monthKey(date: Date): string {
+  return date.toISOString().slice(0, 7);
+}
+
+/** Sum `value(row)` per `monthKey(date(row))`. */
+export function bucketByMonth<T>(
+  rows: readonly T[],
+  date: (row: T) => Date,
+  value: (row: T) => number = () => 1,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const row of rows) {
+    const key = monthKey(date(row));
+    out.set(key, (out.get(key) ?? 0) + value(row));
+  }
+  return out;
+}
+
+/** Dense list of `"YYYY-MM"` keys from `fromKey` through `toKey`, inclusive. */
+export function monthRangeKeys(fromKey: string, toKey: string): string[] {
+  const [fromYear, fromMonth] = fromKey.split("-").map(Number);
+  const [toYear, toMonth] = toKey.split("-").map(Number);
+  const endIndex = toYear * 12 + (toMonth - 1);
+
+  const keys: string[] = [];
+  let year = fromYear;
+  let month = fromMonth - 1;
+  while (year * 12 + month <= endIndex) {
+    keys.push(`${year}-${String(month + 1).padStart(2, "0")}`);
+    month++;
+    if (month > 11) {
+      month = 0;
+      year++;
+    }
+  }
+  return keys;
+}
+
+/** Sum `price(row)` over rows that are not yet paid — the "expected revenue" for scheduled-but-unpaid lessons. */
+export function sumUnpaidPrices<T>(
+  rows: readonly T[],
+  price: (row: T) => number,
+  isPaid: (row: T) => boolean,
+): number {
+  return rows.reduce((sum, row) => (isPaid(row) ? sum : sum + price(row)), 0);
+}
+
 const errorItemSchema = z.object({ type: z.string().min(1) }).passthrough();
 const errorsArraySchema = z.array(errorItemSchema).catch([]);
 

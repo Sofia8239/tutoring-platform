@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 export type StatTint = "plain" | "rose" | "lavender" | "mint" | "peach";
 
 const tints: Record<StatTint, string> = {
@@ -16,7 +18,7 @@ export function StatTile({
 }: {
   label: string;
   value: string;
-  hint?: string;
+  hint?: ReactNode;
   tint?: StatTint;
 }) {
   return (

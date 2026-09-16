@@ -6,25 +6,33 @@ import { requireRole } from "@/lib/session";
 import { resolveTenantId } from "@/lib/tenant";
 import { formatInZone } from "@/lib/datetime";
 import { formatMoney } from "@/lib/money";
+import { prisma } from "@/lib/prisma";
 import {
   LESSON_STATUS_LABEL,
   lessonDurationMinutes,
 } from "@/lib/lesson-display";
+import {
+  PAYMENT_STATUS_LABEL,
+  PAYMENT_STATUS_TONE,
+} from "@/lib/payment-display";
 import { getUserTimezone } from "@/server/users/users";
 import { getLessonForTeacher } from "@/server/lessons/lessons";
 import { getLessonSyncState } from "@/server/lessons/calendar-sync";
 import { listTeacherLessonPages } from "@/server/pages/pages";
 import { listAssignmentsForTeacherLesson } from "@/server/lessons/assignments";
 import { isGoogleCalendarConfigured } from "@/server/integrations/google/config";
+import { isPaymentsConfigured } from "@/server/payments/provider";
 import { LessonStatusBadge } from "@/components/lesson-status-badge";
 import { LessonPagesExport } from "@/components/lessons/lesson-pages-export";
 import { Card, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
 import { LessonStatus, UserRole } from "@/generated/prisma/enums";
 import { createPageAction } from "@/app/(app)/teacher/pages/actions";
 
 import { LessonStatusActions } from "../lesson-status-actions";
 import { LessonSyncPanel } from "../lesson-sync-panel";
+import { RequestLessonPaymentButton } from "../request-lesson-payment-button";
 
 export const metadata: Metadata = { title: "Урок" };
 
@@ -38,13 +46,19 @@ export default async function TeacherLessonDetailPage({
   const { lessonId } = await params;
 
   const googleConfigured = isGoogleCalendarConfigured();
-  const [lesson, timezone, syncState, pages, assignments] = await Promise.all([
-    getLessonForTeacher(teacherId, lessonId),
-    getUserTimezone(user.id),
-    googleConfigured ? getLessonSyncState(teacherId, lessonId) : null,
-    listTeacherLessonPages(teacherId, lessonId),
-    listAssignmentsForTeacherLesson(teacherId, lessonId),
-  ]);
+  const [lesson, timezone, syncState, pages, assignments, payment] =
+    await Promise.all([
+      getLessonForTeacher(teacherId, lessonId),
+      getUserTimezone(user.id),
+      googleConfigured ? getLessonSyncState(teacherId, lessonId) : null,
+      listTeacherLessonPages(teacherId, lessonId),
+      listAssignmentsForTeacherLesson(teacherId, lessonId),
+      prisma.payment.findFirst({
+        where: { lessonId, teacherId },
+        orderBy: { createdAt: "desc" },
+        select: { status: true },
+      }),
+    ]);
 
   if (!lesson) notFound();
 
@@ -208,6 +222,31 @@ export default async function TeacherLessonDetailPage({
           )}
         </div>
       </Card>
+
+      {lesson.price > 0 ? (
+        <Card className="flex flex-col gap-3">
+          <CardTitle>Оплата</CardTitle>
+          {payment ? (
+            <p className="flex items-center gap-2 text-sm">
+              <Badge tone={PAYMENT_STATUS_TONE[payment.status]}>
+                {PAYMENT_STATUS_LABEL[payment.status]}
+              </Badge>
+              <Link
+                href="/teacher/payments"
+                className="text-muted hover:text-ink text-xs"
+              >
+                Усі платежі →
+              </Link>
+            </p>
+          ) : isPaymentsConfigured() ? (
+            <RequestLessonPaymentButton lessonId={lesson.id} />
+          ) : (
+            <p className="text-muted text-sm">
+              Онлайн-оплату не налаштовано на сервері.
+            </p>
+          )}
+        </Card>
+      ) : null}
 
       <Card className="flex flex-col gap-4">
         <CardTitle>Дії</CardTitle>

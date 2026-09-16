@@ -63,6 +63,20 @@ export const serverSchema = z.object({
   // back to AUTH_SECRET locally so a fresh checkout works without one more var.
   WHITEBOARD_SYNC_SECRET: z.string().min(1).optional(),
   WHITEBOARD_SYNC_PORT: z.coerce.number().int().positive().default(8788),
+
+  // Phase 7 — payments. One active provider at a time, same pluggable shape
+  // as AI_PROVIDER, but with no default: payments stay off until a provider
+  // is explicitly chosen (unlike AI, there's no free-tier-safe default here —
+  // this moves real money). Feature-flagged on PAYMENT_PROVIDER + that
+  // provider's own credentials both being present.
+  PAYMENT_PROVIDER: z.enum(["liqpay", "monobank"]).optional(),
+  LIQPAY_PUBLIC_KEY: z.string().min(1).optional(),
+  LIQPAY_PRIVATE_KEY: z.string().min(1).optional(),
+  MONOBANK_ACQUIRING_TOKEN: z.string().min(1).optional(),
+  // Base URL payment providers redirect/webhook back to. Defaults to APP_URL;
+  // override when APP_URL isn't publicly reachable (e.g. an ngrok tunnel
+  // while developing locally — a provider's servers can't POST to localhost).
+  PAYMENTS_WEBHOOK_BASE_URL: z.string().url().optional(),
 });
 
 export const clientSchema = z.object({

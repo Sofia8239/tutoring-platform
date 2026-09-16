@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  gridHourRange,
+  initialScrollHour,
   layoutDayLessons,
   weekDaysISO,
   zonedDayAndMinutes,
@@ -14,6 +14,11 @@ import {
 const HOUR_PX = 48;
 const PX_PER_MIN = HOUR_PX / 60;
 const GUTTER = "3.25rem";
+// The grid always spans the full day — `initialScrollHour` picks where it
+// opens scrolled to, so a mostly-empty midnight-to-6am band isn't the first
+// thing anyone sees.
+const GRID_START_HOUR = 0;
+const GRID_END_HOUR = 24;
 
 const BLOCK_TONE: Record<string, string> = {
   SCHEDULED: "border-primary bg-primary-soft text-primary",
@@ -72,20 +77,16 @@ export function LessonWeekCalendar({
   }, [lessons, days, timezone]);
 
   const allMinutes = useMemo(() => [...byDay.values()].flat(), [byDay]);
-  const [gridStartHour, gridEndHour] = useMemo(
-    () => gridHourRange(allMinutes),
-    [allMinutes],
-  );
-  const gridStartMin = gridStartHour * 60;
+
   const hours = useMemo(
     () =>
       Array.from(
-        { length: gridEndHour - gridStartHour },
-        (_, i) => gridStartHour + i,
+        { length: GRID_END_HOUR - GRID_START_HOUR },
+        (_, i) => GRID_START_HOUR + i,
       ),
-    [gridStartHour, gridEndHour],
+    [],
   );
-  const bodyHeight = (gridEndHour - gridStartHour) * HOUR_PX;
+  const bodyHeight = (GRID_END_HOUR - GRID_START_HOUR) * HOUR_PX;
 
   // Live "now" marker in the teacher's timezone, refreshed each minute.
   const [now, setNow] = useState(() =>
@@ -99,14 +100,31 @@ export function LessonWeekCalendar({
     return () => clearInterval(t);
   }, [timezone]);
 
+  // Full 00:00-24:00 grid opens scrolled to something relevant instead of
+  // midnight: the earliest lesson of the week, or around "now" if today's in
+  // view, falling back to mid-morning. Only on first mount per week.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const nowMinutes = days.includes(now.dateISO) ? now.minutes : null;
+    const hour = initialScrollHour(allMinutes, nowMinutes);
+    scrollRef.current?.scrollTo({ top: hour * HOUR_PX });
+    // Intentionally only re-run when the visible week changes, not on every
+    // "now" tick or lesson refetch — this is an opening position, not a
+    // constant scroll-hijack.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartISO]);
+
   const cols = `${GUTTER} repeat(7, minmax(6.5rem, 1fr))`;
 
   return (
-    <div className="border-line bg-surface shadow-soft rounded-card overflow-x-auto border">
+    <div
+      ref={scrollRef}
+      className="border-line bg-surface shadow-soft rounded-card max-h-[70vh] overflow-auto border"
+    >
       <div className="min-w-[52rem]">
         {/* Day headers */}
         <div
-          className="border-line grid border-b"
+          className="border-line bg-surface sticky top-0 z-20 grid border-b"
           style={{ gridTemplateColumns: cols }}
         >
           <div />
@@ -146,7 +164,7 @@ export function LessonWeekCalendar({
                 className="text-muted absolute right-1.5 -translate-y-1/2 text-[11px]"
                 style={{ top: i * HOUR_PX }}
               >
-                {i === 0 ? "" : `${h}:00`}
+                {i === 0 ? "" : `${String(h).padStart(2, "0")}:00`}
               </span>
             ))}
           </div>
@@ -169,7 +187,7 @@ export function LessonWeekCalendar({
 
                 {/* Lesson blocks */}
                 {placed.map((l) => {
-                  const top = (l.startMin - gridStartMin) * PX_PER_MIN;
+                  const top = (l.startMin - GRID_START_HOUR * 60) * PX_PER_MIN;
                   const height = Math.max(
                     (l.endMin - l.startMin) * PX_PER_MIN - 2,
                     16,
@@ -203,12 +221,12 @@ export function LessonWeekCalendar({
                 })}
 
                 {/* Now marker */}
-                {showNow &&
-                now.minutes >= gridStartMin &&
-                now.minutes <= gridEndHour * 60 ? (
+                {showNow ? (
                   <div
                     className="pointer-events-none absolute inset-x-0 z-10 flex items-center"
-                    style={{ top: (now.minutes - gridStartMin) * PX_PER_MIN }}
+                    style={{
+                      top: (now.minutes - GRID_START_HOUR * 60) * PX_PER_MIN,
+                    }}
                   >
                     <span className="bg-danger -ml-1 size-2 rounded-full" />
                     <span className="bg-danger h-px flex-1" />

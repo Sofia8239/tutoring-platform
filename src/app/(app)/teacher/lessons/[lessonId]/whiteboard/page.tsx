@@ -8,6 +8,8 @@ import { getWhiteboardForTeacher } from "@/server/lessons/whiteboard";
 import { WhiteboardCanvas } from "@/components/whiteboard/whiteboard-canvas";
 import { UserRole } from "@/generated/prisma/enums";
 
+import { toggleStudentCanEditAction } from "./actions";
+
 export const metadata: Metadata = { title: "Дошка" };
 
 export default async function TeacherWhiteboardPage({
@@ -41,6 +43,8 @@ export default async function TeacherWhiteboardPage({
         userId={user.id}
         name={user.name || user.email || "Викладач"}
         role="teacher"
+        initialCanEdit={board.studentCanEdit}
+        toggleAction={toggleStudentCanEditAction}
       />
     </div>
   );

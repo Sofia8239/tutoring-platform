@@ -4,9 +4,10 @@ import { runReminderJob } from "@/jobs/reminders";
 import type { ReminderJobName } from "@/jobs/queue";
 
 /**
- * One-shot reminder scan, no queue — for testing / cron.
+ * One-shot reminder/stats scan, no queue — for testing / cron.
  *   pnpm worker:scan lessons
  *   pnpm worker:scan payments
+ *   pnpm worker:scan stats
  */
 const arg = process.argv[2];
 const job: ReminderJobName | null =
@@ -14,10 +15,12 @@ const job: ReminderJobName | null =
     ? "scan-lessons"
     : arg === "payments"
       ? "scan-payments"
-      : null;
+      : arg === "stats"
+        ? "recompute-daily-stats"
+        : null;
 
 if (!job) {
-  console.error("usage: worker:scan <lessons|payments>");
+  console.error("usage: worker:scan <lessons|payments|stats>");
   process.exit(1);
 }
 

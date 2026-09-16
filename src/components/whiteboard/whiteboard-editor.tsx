@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSync } from "@tldraw/sync";
 import { computed } from "@tldraw/state";
 import { createUserId } from "@tldraw/tlschema";
@@ -44,14 +44,14 @@ const inlineAssetStore: TLAssetStore = {
 /**
  * The tldraw editor, synced live with the lesson's whiteboard room. Loaded
  * via `next/dynamic` with `ssr: false` (tldraw needs `window`).
+ *
+ * `memo`'d: the canvas — and everything sync-related — must not re-run when
+ * an unrelated parent state changes (PDF-export progress, fullscreen), only
+ * when its own props actually change. Once mounted, `<Tldraw>` re-renders
+ * itself through tldraw's own signal-based reactivity anyway, entirely
+ * outside React's render cycle; this just keeps React's side of that quiet.
  */
-export default function WhiteboardEditor({
-  lessonId,
-  userId,
-  name,
-  role,
-  onReady,
-}: Props) {
+function WhiteboardEditor({ lessonId, userId, name, role, onReady }: Props) {
   const currentUser = useMemo(
     () =>
       computed("current-user", () => ({
@@ -65,20 +65,54 @@ export default function WhiteboardEditor({
     [userId, name, role],
   );
 
-  const store = useSync({
-    assets: inlineAssetStore,
-    users: { currentUser },
-    uri: async () => {
-      const res = await fetch(`/api/lessons/${lessonId}/whiteboard/ticket`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`ticket request failed: ${res.status}`);
-      const { ticket } = (await res.json()) as { ticket: string };
-      return `${env.NEXT_PUBLIC_WHITEBOARD_SYNC_URL}/room/${encodeURIComponent(
-        lessonId,
-      )}?ticket=${encodeURIComponent(ticket)}`;
+  // `useSync` tears down and reconnects the whole store whenever `users` or
+  // `uri` change *by reference* (both sit in its own effect's deps array) —
+  // an inline object/closure here would be a new reference on every render,
+  // so the sync connection would reset on every render, which is exactly
+  // what "flickers, can't draw anything" looks like. Both must stay stable
+  // across renders and change only when what they actually depend on does.
+  const users = useMemo(() => ({ currentUser }), [currentUser]);
+
+  // Whether *this* student may currently edit — cosmetic only (the banner
+  // and the local read-only hint below). The real gate is server-side: the
+  // sync room decides `isReadonly` itself, fresh, on every connect; a
+  // tampered client claiming `canEdit: true` here can't talk its way into
+  // write access. `uri()` re-runs on every (re)connect, so a teacher's
+  // toggle — which kicks the student's session — lands here within a beat.
+  const [canEdit, setCanEdit] = useState(true);
+
+  const uri = useCallback(async () => {
+    const res = await fetch(`/api/lessons/${lessonId}/whiteboard/ticket`, {
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`ticket request failed: ${res.status}`);
+    const data = (await res.json()) as { ticket: string; canEdit: boolean };
+    setCanEdit(data.canEdit);
+    return `${env.NEXT_PUBLIC_WHITEBOARD_SYNC_URL}/room/${encodeURIComponent(
+      lessonId,
+    )}?ticket=${encodeURIComponent(data.ticket)}`;
+  }, [lessonId]);
+
+  const store = useSync({ assets: inlineAssetStore, users, uri });
+
+  const editorRef = useRef<Editor | null>(null);
+  const isViewOnly = role === "student" && !canEdit;
+
+  const handleMount = useCallback(
+    (editor: Editor) => {
+      editorRef.current = editor;
+      onReady?.(editor);
     },
-  });
+    [onReady],
+  );
+
+  // Applied both at mount and whenever `canEdit` changes later (the editor
+  // itself is not remounted on reconnect, so this is what picks up a
+  // teacher's toggle for an already-open board) — the local UI half of the
+  // read-only state; the connection-level half lives server-side.
+  useEffect(() => {
+    editorRef.current?.updateInstanceState({ isReadonly: isViewOnly });
+  }, [isViewOnly]);
 
   if (store.status === "loading") {
     return (
@@ -97,5 +131,16 @@ export default function WhiteboardEditor({
     );
   }
 
-  return <Tldraw store={store.store} onMount={(editor) => onReady?.(editor)} />;
+  return (
+    <div className="relative h-full w-full">
+      {isViewOnly ? (
+        <div className="bg-attention-soft text-attention-strong pointer-events-none absolute inset-x-0 top-0 z-30 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium">
+          Вчитель веде — редагування вимкнено
+        </div>
+      ) : null}
+      <Tldraw store={store.store} onMount={handleMount} />
+    </div>
+  );
 }
+
+export default memo(WhiteboardEditor);

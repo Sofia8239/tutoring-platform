@@ -25,12 +25,14 @@ const NAV_BY_ROLE: Record<string, NavItem[]> = {
     { href: "/teacher", label: "Кабінет", icon: "home" },
     { href: "/teacher/lessons", label: "Уроки", icon: "calendar" },
     { href: "/teacher/pages", label: "Сторінки", icon: "file" },
+    { href: "/teacher/payments", label: "Платежі", icon: "card" },
     { href: "/teacher/stats", label: "Статистика", icon: "chart" },
     { href: "/teacher/settings", label: "Налаштування", icon: "settings" },
   ],
   [UserRole.STUDENT]: [
     { href: "/student", label: "Кабінет", icon: "home" },
     { href: "/student/lessons", label: "Уроки", icon: "calendar" },
+    { href: "/student/payments", label: "Платежі", icon: "card" },
   ],
   [UserRole.ADMIN]: [{ href: "/teacher", label: "Кабінет", icon: "home" }],
 };

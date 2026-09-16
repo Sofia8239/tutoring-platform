@@ -12,11 +12,14 @@ import {
 import { runReminderJob } from "@/jobs/reminders";
 
 /**
- * Reminders worker (`pnpm worker`). Runs as its own process next to `next`.
- * Registers two repeatable scans and processes them:
+ * Reminders + stats worker (`pnpm worker`). Runs as its own process next to
+ * `next`. Registers repeatable scans and processes them:
  *   - scan-lessons: every REMINDERS_SCAN_EVERY_MINUTES (default 10) → 24h + 1h
  *     lesson reminders to teacher + student.
  *   - scan-payments: daily → "pay for the next block" reminders to students.
+ *   - recompute-daily-stats: nightly (02:00 UTC) → denormalizes yesterday
+ *     into `DailyStats` for every teacher, backing the stats dashboard's
+ *     full-history trend chart.
  */
 async function main() {
   const everyLessons = env.REMINDERS_SCAN_EVERY_MINUTES * 60_000;
@@ -30,6 +33,11 @@ async function main() {
     "scan-payments",
     { every: 24 * 60 * 60_000 },
     { name: "scan-payments" },
+  );
+  await remindersQueue.upsertJobScheduler(
+    "recompute-daily-stats",
+    { pattern: "0 2 * * *" },
+    { name: "recompute-daily-stats" },
   );
 
   const worker = new Worker(

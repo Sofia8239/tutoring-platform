@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDaysISO,
-  gridHourRange,
+  initialScrollHour,
   layoutDayLessons,
   mondayOf,
   weekDaysISO,
@@ -82,14 +82,31 @@ describe("layoutDayLessons", () => {
   });
 });
 
-describe("gridHourRange", () => {
-  it("falls back to a workday when empty", () => {
-    expect(gridHourRange([])).toEqual([8, 20]);
+describe("initialScrollHour", () => {
+  it("falls back to mid-morning with no lessons and no current time", () => {
+    expect(initialScrollHour([], null)).toBe(8);
   });
 
-  it("expands to fit early / late lessons with an hour of padding", () => {
-    expect(gridHourRange([{ startMin: 7 * 60, endMin: 22 * 60 + 30 }])).toEqual(
-      [6, 23],
-    );
+  it("opens an hour before the earliest lesson of the week", () => {
+    expect(
+      initialScrollHour([{ startMin: 9 * 60, endMin: 10 * 60 }], null),
+    ).toBe(8);
+    expect(
+      initialScrollHour(
+        [
+          { startMin: 14 * 60, endMin: 15 * 60 },
+          { startMin: 9 * 60, endMin: 10 * 60 },
+        ],
+        null,
+      ),
+    ).toBe(8);
+  });
+
+  it("never goes below hour 0", () => {
+    expect(initialScrollHour([{ startMin: 20, endMin: 80 }], null)).toBe(0);
+  });
+
+  it("opens an hour before now when today is in view and there are no lessons", () => {
+    expect(initialScrollHour([], 14 * 60 + 30)).toBe(13);
   });
 });

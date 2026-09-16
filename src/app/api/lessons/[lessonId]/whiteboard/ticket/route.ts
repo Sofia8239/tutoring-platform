@@ -37,5 +37,7 @@ export async function GET(
     { secret: env.WHITEBOARD_SYNC_SECRET ?? env.AUTH_SECRET },
   );
 
-  return NextResponse.json({ ticket });
+  // `canEdit` is UX-only (drives the client's banner / local read-only
+  // hint) — see the doc comment on assertWhiteboardParticipant.
+  return NextResponse.json({ ticket, canEdit: participant.canEdit });
 }

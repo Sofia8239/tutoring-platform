@@ -302,6 +302,11 @@ model Whiteboard {
   teacherId String
   /// tldraw scene snapshot.
   sceneJson Json     @default("{}")
+  /// Teacher-controlled: can the student currently edit the shared board, or
+  /// only watch the teacher draw? Defaults on so a fresh board is shared
+  /// editing from the start. Enforced server-side by the sync process
+  /// (src/jobs/whiteboard-sync-server.ts), not just hidden in the UI.
+  studentCanEdit Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

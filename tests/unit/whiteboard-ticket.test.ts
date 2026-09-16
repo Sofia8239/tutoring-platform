@@ -19,6 +19,18 @@ describe("whiteboard ticket", () => {
     expect(verifyWhiteboardTicket(ticket, SECRET, "lesson_1")).toEqual(payload);
   });
 
+  it("round-trips a student-role ticket the same way", () => {
+    const studentPayload = {
+      ...payload,
+      role: "student" as const,
+      userId: "user_2",
+    };
+    const ticket = mintWhiteboardTicket(studentPayload, { secret: SECRET });
+    expect(verifyWhiteboardTicket(ticket, SECRET, "lesson_1")).toEqual(
+      studentPayload,
+    );
+  });
+
   it("rejects a ticket minted for a different lesson (no room hijacking)", () => {
     const ticket = mintWhiteboardTicket(payload, { secret: SECRET });
     expect(verifyWhiteboardTicket(ticket, SECRET, "lesson_2")).toBeNull();
