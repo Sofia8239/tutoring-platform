@@ -91,7 +91,7 @@ export function SubmitWorkForm({
           rows={5}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Напишіть розвʼязання або поясніть відповідь"
+          placeholder="Напишіть виконане завдання або поясніть відповідь"
           className={inputClass}
         />
       </label>

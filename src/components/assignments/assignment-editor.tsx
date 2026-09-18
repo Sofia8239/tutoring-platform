@@ -174,7 +174,7 @@ export function AssignmentEditor({
       </label>
 
       <label className={labelClass}>
-        <span className="font-medium">Схожий розвʼязаний приклад</span>
+        <span className="font-medium">Приклад виконання схожого завдання</span>
         <textarea
           value={c.example}
           onChange={(e) => setC({ ...c, example: e.target.value })}
@@ -184,7 +184,7 @@ export function AssignmentEditor({
       </label>
 
       <label className={labelClass}>
-        <span className="font-medium">Кроки розвʼязання (один на рядок)</span>
+        <span className="font-medium">Кроки виконання (один на рядок)</span>
         <textarea
           value={steps}
           onChange={(e) => setSteps(e.target.value)}

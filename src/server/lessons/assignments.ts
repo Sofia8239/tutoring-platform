@@ -3,6 +3,8 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
+import { SubmissionStatus } from "@/generated/prisma/enums";
+
 /**
  * Assignment reads. Teachers see everything (including the AI solution stored in
  * `metadataJson`); students see only the statement and due date for assignments
@@ -26,6 +28,12 @@ export type AssignmentListItem = {
   dueAt: Date | null;
   type: string | null;
   difficulty: string | null;
+  /** The most recent submission for this assignment, if any (a student may resubmit). */
+  latestSubmission: {
+    id: string;
+    status: SubmissionStatus;
+    score: number | null;
+  } | null;
 };
 
 function toListItem(row: {
@@ -33,7 +41,7 @@ function toListItem(row: {
   title: string;
   dueAt: Date | null;
   metadataJson: unknown;
-}): AssignmentListItem {
+}): Omit<AssignmentListItem, "latestSubmission"> {
   const meta = metadataSchema.parse(row.metadataJson ?? {});
   return {
     id: row.id,
@@ -42,6 +50,47 @@ function toListItem(row: {
     type: meta.type ?? null,
     difficulty: meta.difficulty ?? null,
   };
+}
+
+/** Attaches each assignment's most recent submission (by `submittedAt`), if any. */
+async function withLatestSubmission(
+  rows: {
+    id: string;
+    title: string;
+    dueAt: Date | null;
+    metadataJson: unknown;
+  }[],
+): Promise<AssignmentListItem[]> {
+  const base = rows.map(toListItem);
+  if (base.length === 0) return [];
+
+  const submissions = await prisma.submission.findMany({
+    where: { assignmentId: { in: base.map((a) => a.id) } },
+    orderBy: { submittedAt: "desc" },
+    select: {
+      id: true,
+      assignmentId: true,
+      status: true,
+      review: { select: { score: true } },
+    },
+  });
+
+  const latestByAssignment = new Map<string, (typeof submissions)[number]>();
+  for (const s of submissions) {
+    if (!latestByAssignment.has(s.assignmentId)) {
+      latestByAssignment.set(s.assignmentId, s);
+    }
+  }
+
+  return base.map((a) => {
+    const latest = latestByAssignment.get(a.id);
+    return {
+      ...a,
+      latestSubmission: latest
+        ? { id: latest.id, status: latest.status, score: latest.review?.score ?? null }
+        : null,
+    };
+  });
 }
 
 export async function listAssignmentsForTeacherLesson(
@@ -53,7 +102,7 @@ export async function listAssignmentsForTeacherLesson(
     orderBy: { createdAt: "desc" },
     select: { id: true, title: true, dueAt: true, metadataJson: true },
   });
-  return rows.map(toListItem);
+  return withLatestSubmission(rows);
 }
 
 export async function listAssignmentsForStudentLesson(
@@ -65,7 +114,7 @@ export async function listAssignmentsForStudentLesson(
     orderBy: { createdAt: "desc" },
     select: { id: true, title: true, dueAt: true, metadataJson: true },
   });
-  return rows.map(toListItem);
+  return withLatestSubmission(rows);
 }
 
 export type TeacherAssignment = {

@@ -10,7 +10,8 @@ export type IconName =
   | "board"
   | "check"
   | "inbox"
-  | "card";
+  | "card"
+  | "users";
 
 const paths: Record<IconName, string> = {
   home: "M3 10.5 12 3l9 7.5M5 9.5V21h5v-6h4v6h5V9.5",
@@ -29,6 +30,8 @@ const paths: Record<IconName, string> = {
   inbox:
     "M4 13h4l2 3h4l2-3h4M5 5h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z",
   card: "M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1ZM2 10h20M6 15h4",
+  users:
+    "M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
 };
 
 export function Icon({
@@ -41,6 +44,8 @@ export function Icon({
   return (
     <svg
       viewBox="0 0 24 24"
+      width={24}
+      height={24}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"

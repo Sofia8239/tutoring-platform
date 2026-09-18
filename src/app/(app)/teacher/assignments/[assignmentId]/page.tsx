@@ -50,7 +50,7 @@ export default async function TeacherAssignmentPage({
       </div>
 
       <Card className="flex flex-col gap-3">
-        <CardTitle>Завдання та розвʼязання</CardTitle>
+        <CardTitle>Завдання та приклад виконання</CardTitle>
         <AssignmentEditor
           assignmentId={assignmentId}
           initial={content}

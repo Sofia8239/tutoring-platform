@@ -4,7 +4,7 @@
  * matching adapter.
  */
 
-export type ProviderName = "gemini" | "claude" | "openai";
+export type ProviderName = "gemini" | "claude" | "openai" | "openrouter";
 
 export type AiEnv = {
   AI_PROVIDER: ProviderName;
@@ -14,6 +14,8 @@ export type AiEnv = {
   GEMINI_MODEL: string;
   OPENAI_API_KEY?: string;
   OPENAI_MODEL: string;
+  OPENROUTER_API_KEY?: string;
+  OPENROUTER_MODEL: string;
 };
 
 export type ProviderChoice = {
@@ -26,12 +28,14 @@ const KEY: Record<ProviderName, keyof AiEnv> = {
   gemini: "GEMINI_API_KEY",
   claude: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
 };
 
 const MODEL: Record<ProviderName, keyof AiEnv> = {
   gemini: "GEMINI_MODEL",
   claude: "ANTHROPIC_MODEL",
   openai: "OPENAI_MODEL",
+  openrouter: "OPENROUTER_MODEL",
 };
 
 /** The active provider + its credentials, or `null` when the key is missing. */

@@ -3,6 +3,11 @@ import "server-only";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import {
+  DEFAULT_INSTRUCTION_LANGUAGE,
+  describeDisciplineContext,
+  type DisciplineContext,
+} from "@/lib/ai-context";
 import { AiError, getAiProvider } from "@/server/ai/provider";
 import {
   DIFFICULTIES,
@@ -10,6 +15,7 @@ import {
   generatedProblemSchema,
   type GeneratedProblem,
 } from "@/server/ai/task-schema";
+import { resolveSubjectLabel } from "@/server/teacher/disciplines";
 import type { Prisma } from "@/generated/prisma/client";
 
 /**
@@ -141,12 +147,15 @@ export function updateAssignmentContent(
   return writeContent(teacherId, assignmentId, patch);
 }
 
-const REFINE_SYSTEM = `Ти — досвідчений методист. Тобі дають наявне навчальне\
- завдання (умову й розвʼязання) та інструкцію викладача, як його змінити.\
- Поверни ОНОВЛЕНЕ завдання ПОВНІСТЮ у тому самому форматі: умова, тип,\
- складність, коротка відповідь, приклад іншої схожої розвʼязаної задачі,\
- покрокове розвʼязання, 1–3 підказки. Мова — українська. Зберігай тему й\
- навчальну мету, зміни лише те, що просить викладач.`;
+function buildRefineSystemPrompt(context: DisciplineContext): string {
+  return `Ти — досвідчений методист. Тобі дають наявне навчальне завдання\
+ (умову й приклад виконання) та інструкцію викладача, як його змінити.\
+ ${describeDisciplineContext(context)}\n\
+Поверни ОНОВЛЕНЕ завдання ПОВНІСТЮ у тому самому форматі: умова, тип,\
+ складність, коротка відповідь, приклад виконання іншого схожого завдання,\
+ покроковий розбір виконання, 1–3 підказки. Зберігай тему й навчальну мету,\
+ зміни лише те, що просить викладач.`;
+}
 
 export async function refineAssignmentWithAi(
   teacherId: string,
@@ -164,6 +173,15 @@ export async function refineAssignmentWithAi(
   const current = await getAssignmentContent(teacherId, assignmentId);
   if (!current) throw new AssignmentEditError("Завдання не знайдено.");
 
+  const lessonSubject = await prisma.assignment.findFirst({
+    where: { id: assignmentId, teacherId },
+    select: { lesson: { select: { subject: true } } },
+  });
+  const subjectLabel = await resolveSubjectLabel(
+    teacherId,
+    lessonSubject?.lesson?.subject ?? null,
+  );
+
   const currentProblem: GeneratedProblem = {
     prompt: current.description,
     type: current.type || "завдання",
@@ -177,7 +195,12 @@ export async function refineAssignmentWithAi(
   const { value } = await provider.generateStructured({
     schema: generatedProblemSchema,
     schemaName: "refined_problem",
-    system: REFINE_SYSTEM,
+    system: buildRefineSystemPrompt({
+      subjectLabel,
+      level: null,
+      taskType: currentProblem.type || null,
+      instructionLanguage: DEFAULT_INSTRUCTION_LANGUAGE,
+    }),
     prompt: `Наявне завдання (JSON):\n${JSON.stringify(currentProblem, null, 2)}\n\nІнструкція викладача:\n${trimmed}`,
   });
 

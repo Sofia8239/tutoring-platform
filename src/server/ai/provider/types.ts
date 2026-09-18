@@ -36,7 +36,7 @@ export type GenerateStructuredResult<T> = {
 };
 
 export interface AiProvider {
-  readonly name: "gemini" | "claude" | "openai";
+  readonly name: "gemini" | "claude" | "openai" | "openrouter";
   readonly model: string;
   generateStructured<T>(
     input: GenerateStructuredInput<T>,

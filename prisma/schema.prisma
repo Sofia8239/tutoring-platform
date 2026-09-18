@@ -171,9 +171,31 @@ model User {
   dailyStats         DailyStats[]
   googleIntegration  GoogleIntegration?
   pushSubscriptions  PushSubscription[]
+  /// TEACHER only: the disciplines/subjects they teach (see TeacherDiscipline).
+  teacherDisciplines TeacherDiscipline[] @relation("TeacherDisciplines")
 
   @@index([tenantId])
   @@index([role])
+}
+
+/// TEACHER only: one row per discipline/subject a teacher teaches (e.g. "math",
+/// "english"). A teacher may have several; `isPrimary` marks the default used
+/// when a Lesson doesn't set its own `disciplineKey`. `key` is a stable slug
+/// (module registration and gating will match on it); `label` is the
+/// teacher-facing display name. Free-text, not an enum, so adding a new
+/// discipline never needs a schema migration.
+model TeacherDiscipline {
+  id        String   @id @default(cuid())
+  teacherId String
+  key       String
+  label     String
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  teacher User @relation("TeacherDisciplines", fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, key])
+  @@index([teacherId])
 }
 
 /// Student onboarding: a teacher issues an invitation; the raw token travels
@@ -260,6 +282,11 @@ model Lesson {
   teacherId          String
   studentId          String
   subject            String
+  /// Stable slug identifying the teaching discipline this lesson belongs to
+  /// (e.g. "math", "english") — used to gate which subject module is active.
+  /// Null means "inherit the teacher's primary discipline" (see
+  /// TeacherDiscipline); distinct from `subject`, which is free display text.
+  disciplineKey      String?
   scheduledStart     DateTime
   scheduledEnd       DateTime
   status             LessonStatus @default(SCHEDULED)
@@ -273,6 +300,11 @@ model Lesson {
   price              Int          @default(0)
   currency           String       @default("UAH")
   notes              String?
+  /// "What happened in the lesson" — filled in by the teacher after class.
+  /// Distinct from `notes` (a pre-lesson planning note). A future AI feature
+  /// will offer to draft this from the whiteboard/chat transcript; for now
+  /// it's plain manual text.
+  summary            String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

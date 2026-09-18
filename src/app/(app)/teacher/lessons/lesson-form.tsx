@@ -19,6 +19,7 @@ const inputClass = fieldClass;
 
 type Props = {
   students: { id: string; name: string | null; email: string }[];
+  disciplines: { key: string; label: string; isPrimary: boolean }[];
   timezone: string;
   mode: "create" | "edit";
   lessonId?: string;
@@ -27,6 +28,7 @@ type Props = {
 
 export function LessonForm({
   students,
+  disciplines,
   timezone,
   mode,
   lessonId,
@@ -76,6 +78,28 @@ export function LessonForm({
           className={inputClass}
         />
       </label>
+
+      {disciplines.length > 0 ? (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Галузь (необовʼязково)</span>
+          <select
+            name="disciplineKey"
+            defaultValue={values.disciplineKey}
+            className={inputClass}
+          >
+            <option value="">
+              За замовчуванням —{" "}
+              {disciplines.find((d) => d.isPrimary)?.label ??
+                disciplines[0].label}
+            </option>
+            {disciplines.map((d) => (
+              <option key={d.key} value={d.key}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">

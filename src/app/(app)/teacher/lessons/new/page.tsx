@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/session";
 import { resolveTenantId } from "@/lib/tenant";
 import { utcToZonedWallTime } from "@/lib/datetime";
 import { getTeacherProfile, listTenantStudents } from "@/server/users/users";
+import { listTeacherDisciplines } from "@/server/teacher/disciplines";
 import { UserRole } from "@/generated/prisma/enums";
 
 import { LessonForm } from "../lesson-form";
@@ -26,9 +27,10 @@ export default async function NewLessonPage({
   const teacherId = resolveTenantId(user);
   const { start } = await searchParams;
 
-  const [students, profile] = await Promise.all([
+  const [students, profile, disciplines] = await Promise.all([
     listTenantStudents(teacherId),
     getTeacherProfile(teacherId),
+    listTeacherDisciplines(teacherId),
   ]);
   const { timezone } = profile;
 
@@ -61,10 +63,12 @@ export default async function NewLessonPage({
         <LessonForm
           mode="create"
           students={students}
+          disciplines={disciplines}
           timezone={timezone}
           initialValues={{
             studentId: "",
             subject: "",
+            disciplineKey: "",
             start: startValue,
             durationMinutes: "60",
             price: "",

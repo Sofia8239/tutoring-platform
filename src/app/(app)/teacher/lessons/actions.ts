@@ -16,6 +16,7 @@ import {
   deleteLesson,
   LessonValidationError,
   updateLesson,
+  updateLessonSummary,
   type LessonInput,
 } from "@/server/lessons/lessons";
 import {
@@ -31,6 +32,7 @@ import { LessonStatus, UserRole } from "@/generated/prisma/enums";
 export type LessonFormValues = {
   studentId: string;
   subject: string;
+  disciplineKey: string;
   start: string;
   durationMinutes: string;
   price: string;
@@ -53,6 +55,7 @@ const lessonFormSchema = z.object({
     .trim()
     .min(2, "Вкажіть тему уроку.")
     .max(200, "Тема задовга."),
+  disciplineKey: z.string().trim().max(40).optional().default(""),
   start: z.string().regex(WALL_CLOCK_RE, "Вкажіть дату й час початку."),
   durationMinutes: z.coerce
     .number()
@@ -68,6 +71,7 @@ function readFormValues(formData: FormData): LessonFormValues {
   return {
     studentId: String(formData.get("studentId") ?? ""),
     subject: String(formData.get("subject") ?? ""),
+    disciplineKey: String(formData.get("disciplineKey") ?? ""),
     start: String(formData.get("start") ?? ""),
     durationMinutes: String(formData.get("durationMinutes") ?? "60"),
     price: String(formData.get("price") ?? ""),
@@ -105,6 +109,7 @@ async function toLessonInput(
   return {
     studentId: values.studentId,
     subject: values.subject,
+    disciplineKey: values.disciplineKey || null,
     scheduledStart,
     scheduledEnd,
     price,
@@ -290,4 +295,41 @@ export async function retryLessonSyncAction(
     return { ok: false, message: "Google Календар не підключено." };
   }
   return { ok: true, message: "Синхронізовано з Google Календарем." };
+}
+
+// ---------------------------------------------------------------------------
+// Lesson summary ("what happened") — independent of the full edit form
+// ---------------------------------------------------------------------------
+
+export type SummaryActionState = {
+  ok: boolean;
+  message: string | null;
+  value: string;
+};
+
+export async function updateLessonSummaryAction(
+  _prev: SummaryActionState,
+  formData: FormData,
+): Promise<SummaryActionState> {
+  const user = await requireRole(UserRole.TEACHER);
+  const teacherId = resolveTenantId(user);
+  const lessonId = String(formData.get("lessonId") ?? "");
+  const summary = String(formData.get("summary") ?? "");
+
+  if (!lessonId) {
+    return { ok: false, message: "Урок не знайдено.", value: summary };
+  }
+
+  try {
+    await updateLessonSummary(teacherId, lessonId, summary);
+  } catch (error) {
+    if (error instanceof LessonValidationError) {
+      return { ok: false, message: error.message, value: summary };
+    }
+    throw error;
+  }
+
+  revalidatePath(`/teacher/lessons/${lessonId}`);
+  revalidatePath(`/student/lessons/${lessonId}`);
+  return { ok: true, message: "Збережено.", value: summary.trim() };
 }

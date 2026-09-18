@@ -9,6 +9,7 @@ import { toMajorString } from "@/lib/money";
 import { lessonDurationMinutes } from "@/lib/lesson-display";
 import { getUserTimezone, listTenantStudents } from "@/server/users/users";
 import { getLessonForTeacher } from "@/server/lessons/lessons";
+import { listTeacherDisciplines } from "@/server/teacher/disciplines";
 import { LessonStatus, UserRole } from "@/generated/prisma/enums";
 
 import { LessonForm } from "../../lesson-form";
@@ -24,10 +25,11 @@ export default async function EditLessonPage({
   const teacherId = resolveTenantId(user);
   const { lessonId } = await params;
 
-  const [lesson, students, timezone] = await Promise.all([
+  const [lesson, students, timezone, disciplines] = await Promise.all([
     getLessonForTeacher(teacherId, lessonId),
     listTenantStudents(teacherId),
     getUserTimezone(user.id),
+    listTeacherDisciplines(teacherId),
   ]);
 
   if (!lesson) notFound();
@@ -53,10 +55,12 @@ export default async function EditLessonPage({
         mode="edit"
         lessonId={lesson.id}
         students={students}
+        disciplines={disciplines}
         timezone={timezone}
         initialValues={{
           studentId: lesson.student.id,
           subject: lesson.subject,
+          disciplineKey: lesson.disciplineKey ?? "",
           start: utcToZonedWallTime(lesson.scheduledStart, timezone),
           durationMinutes: String(
             lessonDurationMinutes(lesson.scheduledStart, lesson.scheduledEnd),

@@ -7,6 +7,7 @@ const base: AiEnv = {
   ANTHROPIC_MODEL: "claude-opus-5",
   GEMINI_MODEL: "gemini-2.5-flash",
   OPENAI_MODEL: "gpt-4o-mini",
+  OPENROUTER_MODEL: "openai/gpt-4o-mini",
 };
 
 describe("resolveProviderChoice", () => {
@@ -37,6 +38,17 @@ describe("resolveProviderChoice", () => {
         OPENAI_API_KEY: "o",
       }),
     ).toEqual({ provider: "openai", apiKey: "o", model: "gpt-4o-mini" });
+    expect(
+      resolveProviderChoice({
+        ...base,
+        AI_PROVIDER: "openrouter",
+        OPENROUTER_API_KEY: "r",
+      }),
+    ).toEqual({
+      provider: "openrouter",
+      apiKey: "r",
+      model: "openai/gpt-4o-mini",
+    });
   });
 
   it("does not fall back to another provider's key", () => {

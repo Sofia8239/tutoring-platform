@@ -32,13 +32,20 @@ export const serverSchema = z.object({
   // Phase 4/5 — AI (task generation + homework review). Provider is pluggable:
   // AI_PROVIDER picks which adapter runs; the feature is enabled only when that
   // provider's API key is present. Default is Gemini (free tier friendly).
-  AI_PROVIDER: z.enum(["gemini", "claude", "openai"]).default("gemini"),
+  AI_PROVIDER: z
+    .enum(["gemini", "claude", "openai", "openrouter"])
+    .default("gemini"),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-5"),
   GEMINI_API_KEY: z.string().min(1).optional(),
-  GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
+  GEMINI_MODEL: z.string().min(1).default("gemini-3.6-flash"),
   OPENAI_API_KEY: z.string().min(1).optional(),
   OPENAI_MODEL: z.string().min(1).default("gpt-4o-mini"),
+  // OpenRouter: one key, many models — a fallback list is the "insurance"
+  // against one model/provider being down (see openrouter.ts).
+  OPENROUTER_API_KEY: z.string().min(1).optional(),
+  OPENROUTER_MODEL: z.string().min(1).default("openai/gpt-4o-mini"),
+  OPENROUTER_FALLBACK_MODELS: z.string().optional(),
 
   // Phase 5 — Cloudflare R2 (S3-compatible). Feature-flagged on all four core
   // vars being present; file uploads fall back to text-only without them.

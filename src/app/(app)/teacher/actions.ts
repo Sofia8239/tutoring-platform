@@ -42,6 +42,7 @@ export async function inviteStudentAction(
   });
 
   revalidatePath("/teacher");
+  revalidatePath("/teacher/students");
 
   return {
     ok: true,
@@ -87,5 +88,6 @@ export async function addManualStudentAction(
   }
 
   revalidatePath("/teacher");
+  revalidatePath("/teacher/students");
   return { ok: true, message: "Учня додано." };
 }

@@ -36,6 +36,7 @@ const now = Date.now();
 
 /** Remove everything previously seeded for this tenant so the seed is repeatable. */
 async function resetTenant(teacherId: string): Promise<void> {
+  await prisma.teacherDiscipline.deleteMany({ where: { teacherId } });
   await prisma.aIReview.deleteMany({ where: { teacherId } });
   await prisma.submission.deleteMany({ where: { teacherId } });
   await prisma.assignment.deleteMany({ where: { teacherId } });
@@ -84,6 +85,14 @@ async function main(): Promise<void> {
   const teacherId = teacher.id;
 
   await resetTenant(teacherId);
+
+  // --- Disciplines (subjects the demo teacher teaches) ------------------
+  await prisma.teacherDiscipline.create({
+    data: { teacherId, key: "matematyka", label: "Математика", isPrimary: true },
+  });
+  await prisma.teacherDiscipline.create({
+    data: { teacherId, key: "fizyka", label: "Фізика", isPrimary: false },
+  });
 
   // --- Students --------------------------------------------------------
   const anna = await prisma.user.create({

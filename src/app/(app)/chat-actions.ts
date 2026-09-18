@@ -56,7 +56,7 @@ export async function askAiInChatAction(input: {
     const { value } = await provider.generateStructured({
       schema: aiReplySchema,
       schemaName: "chat_reply",
-      system: `Ти — AI-асистент репетитора у чаті уроку «${ctx.subject}». Відповідай коротко й зрозуміло, українською. Допомагай пояснити тему й навести на розвʼязання, але не виконуй усю роботу за учня.`,
+      system: `Ти — AI-асистент репетитора у чаті уроку «${ctx.subject}». Відповідай коротко й зрозуміло, українською. Допомагай пояснити тему й підвести учня до виконання завдання, але не виконуй усю роботу за нього.`,
       prompt: `Останні повідомлення чату (senderType: текст):\n${transcript}\n\nДай наступну відповідь асистента.`,
       maxTokens: 1200,
     });

@@ -3,34 +3,54 @@ import "server-only";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import {
+  DEFAULT_INSTRUCTION_LANGUAGE,
+  describeDisciplineContext,
+  type DisciplineContext,
+} from "@/lib/ai-context";
 import { AiError, getAiProvider, isAiConfigured } from "@/server/ai/provider";
 import { reviewSchema, type SubmissionReview } from "@/server/ai/review-schema";
 import { isR2Configured, fetchObjectBase64 } from "@/server/storage/r2";
+import { resolveSubjectLabel } from "@/server/teacher/disciplines";
 import { SubmissionStatus } from "@/generated/prisma/enums";
 import type { Prisma } from "@/generated/prisma/client";
 
 /**
  * AI review of a student submission (golden rule 5: structured JSON, Zod).
  * Reads the submission text and/or the uploaded photo/PDF (via R2) plus the
- * assignment's expected solution, and returns a list of located errors + score.
+ * assignment's expected answer, and returns a list of located errors + score.
+ *
+ * Subject-neutral by construction: the system prompt is built from the
+ * caller's `DisciplineContext` instead of a fixed math error taxonomy — the
+ * model picks error categories that fit the subject (arithmetic/formula for
+ * exact sciences, grammar/style for languages, etc.), or infers the subject
+ * itself when no context is available.
  */
 
 const assignmentMetaSchema = z
   .object({
+    type: z.string().optional(),
     answer: z.string().optional(),
     solutionSteps: z.array(z.string()).optional(),
   })
   .catch({});
 
-const SYSTEM_PROMPT = `Ти — уважний і доброзичливий репетитор, що перевіряє\
- домашню роботу учня. Порівняй роботу з умовою та еталонним розв'язанням.\
- Знайди КОНКРЕТНІ помилки: для кожної вкажи де саме (крок / рядок / частина),\
- тип (арифметика / формула / логіка / оформлення), пояснення зрозумілою учневі\
- мовою та серйозність. Постав оцінку 0–100 (або null, якщо оцінити неможливо)\
- і дай короткий підсумок. Уся відповідь — українською. Якщо помилок немає —\
- поверни порожній масив errors і це відзнач у summary.`;
+function buildReviewSystemPrompt(context: DisciplineContext): string {
+  return `Ти — уважний і доброзичливий репетитор, що перевіряє домашню роботу\
+ учня. ${describeDisciplineContext(context)}\n\
+Порівняй роботу з умовою та еталонною відповіддю. Знайди КОНКРЕТНІ помилки:\
+ для кожної вкажи де саме (крок / рядок / частина), тип помилки — сформулюй\
+ його природною мовою, доречною саме для цього предмета (наприклад, для\
+ точних наук: обчислення, формула, логіка; для мов: граматика, лексика,\
+ стиль; для гуманітарних предметів: фактаж, аргументація — обери підхожі\
+ категорії сам, якщо предмет інший), пояснення зрозумілою учневі мовою та\
+ серйозність. Постав оцінку 0–100 (або null, якщо оцінити неможливо) і дай\
+ короткий підсумок. Якщо помилок немає — поверни порожній масив errors і це\
+ відзнач у summary.`;
+}
 
 type ReviewInput = {
+  context: DisciplineContext;
   assignmentTitle: string;
   assignmentDescription: string;
   expectedAnswer: string | null;
@@ -77,7 +97,7 @@ async function callReview(input: ReviewInput): Promise<ReviewResult> {
   const { value, model, usage } = await provider.generateStructured({
     schema: reviewSchema,
     schemaName: "homework_review",
-    system: SYSTEM_PROMPT,
+    system: buildReviewSystemPrompt(input.context),
     prompt: promptUsed,
     files: input.file ? [input.file] : [],
   });
@@ -137,7 +157,12 @@ export async function runAutoReview(
       fileUrl: true,
       fileType: true,
       assignment: {
-        select: { title: true, description: true, metadataJson: true },
+        select: {
+          title: true,
+          description: true,
+          metadataJson: true,
+          lesson: { select: { subject: true } },
+        },
       },
     },
   });
@@ -160,8 +185,18 @@ export async function runAutoReview(
     const meta = assignmentMetaSchema.parse(
       submission.assignment.metadataJson ?? {},
     );
+    const subjectLabel = await resolveSubjectLabel(
+      submission.teacherId,
+      submission.assignment.lesson?.subject ?? null,
+    );
 
     const result = await callReview({
+      context: {
+        subjectLabel,
+        level: null,
+        taskType: meta.type ?? null,
+        instructionLanguage: DEFAULT_INSTRUCTION_LANGUAGE,
+      },
       assignmentTitle: submission.assignment.title,
       assignmentDescription: submission.assignment.description,
       expectedAnswer: meta.answer ?? null,

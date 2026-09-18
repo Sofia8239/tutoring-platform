@@ -34,7 +34,7 @@ export async function saveGeneratedAssignments(
 ): Promise<{ count: number }> {
   const problems = input.problems.map((p) => generatedProblemSchema.parse(p));
   if (problems.length === 0) {
-    throw new SaveAssignmentsError("Не обрано жодної задачі.");
+    throw new SaveAssignmentsError("Не обрано жодного завдання.");
   }
 
   if (input.lessonId) {

@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/session";
 import { resolveTenantId } from "@/lib/tenant";
 import { formatInZone } from "@/lib/datetime";
 import { getTeacherProfile } from "@/server/users/users";
+import { listTeacherDisciplines } from "@/server/teacher/disciplines";
 import { isGoogleCalendarConfigured } from "@/server/integrations/google/config";
 import { getGoogleIntegrationSummary } from "@/server/integrations/google/client";
 import { PageHeader } from "@/components/ui/page-header";
@@ -11,7 +12,7 @@ import { Card, CardTitle } from "@/components/ui/card";
 import { buttonClass } from "@/components/ui/button";
 import { UserRole } from "@/generated/prisma/enums";
 
-import { MeetingUrlForm } from "./settings-form";
+import { DisciplinesForm, MeetingUrlForm } from "./settings-form";
 import { disconnectGoogleAction } from "./actions";
 
 export const metadata: Metadata = { title: "Налаштування" };
@@ -37,7 +38,10 @@ export default async function TeacherSettingsPage({
   const teacherId = resolveTenantId(user);
   const { google } = await searchParams;
 
-  const profile = await getTeacherProfile(teacherId);
+  const [profile, disciplines] = await Promise.all([
+    getTeacherProfile(teacherId),
+    listTeacherDisciplines(teacherId),
+  ]);
   const googleConfigured = isGoogleCalendarConfigured();
   const googleIntegration = googleConfigured
     ? await getGoogleIntegrationSummary(teacherId)
@@ -47,6 +51,15 @@ export default async function TeacherSettingsPage({
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Налаштування" />
+
+      <Card className="flex flex-col gap-3">
+        <CardTitle>Предмети / галузі</CardTitle>
+        <p className="text-muted text-sm">
+          Предмети, які ви викладаєте. Основний використовується за
+          замовчуванням для нових уроків, якщо не обрати інший явно.
+        </p>
+        <DisciplinesForm disciplines={disciplines} />
+      </Card>
 
       <Card className="flex flex-col gap-3">
         <CardTitle>Відеозустрічі</CardTitle>

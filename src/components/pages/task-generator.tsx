@@ -5,9 +5,11 @@ import { useMemo, useState, useTransition } from "react";
 
 import { DIFFICULTY_LABEL } from "@/server/ai/task-schema";
 import type { GeneratedProblem } from "@/server/ai/task-schema";
+import type { WhiteboardScene } from "@/lib/whiteboard-scene";
 
 import { fieldClass } from "@/components/ui/field";
 import { buttonClass } from "@/components/ui/button";
+import { WhiteboardImageCapture } from "@/components/whiteboard/whiteboard-image-capture";
 import {
   generateTasksAction,
   saveTasksAction,
@@ -25,10 +27,17 @@ export function TaskGenerator({
   pageId,
   lessons,
   students,
+  lockedLessonId,
+  whiteboardScene,
 }: {
-  pageId: string;
+  pageId: string | null;
   lessons: Lesson[];
   students: Student[];
+  /** When set, generation is scoped to this one lesson — no "Урок" picker. */
+  lockedLessonId?: string;
+  /** The locked lesson's saved board, if any — captured as an image and sent
+   *  to the AI as vision input (plain-text extraction misses hand-drawing). */
+  whiteboardScene?: WhiteboardScene | null;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -38,9 +47,17 @@ export function TaskGenerator({
   const [count, setCount] = useState(4);
   const [difficulty, setDifficulty] =
     useState<GenerateInput["difficulty"]>("mixed");
-  const [lessonId, setLessonId] = useState("");
+  const [lessonId, setLessonId] = useState(lockedLessonId ?? "");
   const [studentId, setStudentId] = useState("");
   const [includeWhiteboard, setIncludeWhiteboard] = useState(true);
+  const [level, setLevel] = useState("");
+  const [taskType, setTaskType] = useState("");
+  const [boardImageDataUrl, setBoardImageDataUrl] = useState<string | null>(
+    null,
+  );
+  const [boardImageStatus, setBoardImageStatus] = useState<
+    "idle" | "capturing" | "ready" | "empty"
+  >(whiteboardScene ? "capturing" : "idle");
 
   // results
   const [problems, setProblems] = useState<GeneratedProblem[] | null>(null);
@@ -62,9 +79,12 @@ export function TaskGenerator({
         pageId,
         lessonId: lessonId || null,
         includeWhiteboard: includeWhiteboard && Boolean(lessonId),
+        boardImageDataUrl: includeWhiteboard ? boardImageDataUrl : null,
         instructions,
         count,
         difficulty,
+        level: level || undefined,
+        taskType: taskType || undefined,
       });
       if (res.ok) {
         setProblems(res.problems);
@@ -83,7 +103,7 @@ export function TaskGenerator({
     setError(null);
     const chosen = problems.filter((_, i) => selected.has(i));
     if (chosen.length === 0) {
-      setError("Оберіть хоча б одну задачу.");
+      setError("Оберіть хоча б одне завдання.");
       return;
     }
     startTransition(async () => {
@@ -134,7 +154,7 @@ export function TaskGenerator({
     return (
       <div className="flex flex-col gap-4">
         <p className="text-muted text-xs">
-          Модель: {aiModel}. Зніміть галочки з непотрібних задач.
+          Модель: {aiModel}. Зніміть галочки з непотрібних завдань.
         </p>
 
         <ul className="flex flex-col gap-3">
@@ -158,16 +178,18 @@ export function TaskGenerator({
                   </span>
                   <span>{p.prompt}</span>
                   <details className="text-muted mt-1 text-xs">
-                    <summary className="cursor-pointer">Розвʼязання</summary>
+                    <summary className="cursor-pointer">
+                      Деталі виконання
+                    </summary>
                     <div className="mt-1 flex flex-col gap-1">
                       <p>
                         <b>Відповідь:</b> {p.answer}
                       </p>
                       <p>
-                        <b>Схожий приклад:</b> {p.example}
+                        <b>Приклад виконання:</b> {p.example}
                       </p>
                       <p>
-                        <b>Кроки:</b>
+                        <b>Кроки виконання:</b>
                       </p>
                       <ol className="list-decimal pl-5">
                         {p.solutionSteps.map((s, j) => (
@@ -236,14 +258,36 @@ export function TaskGenerator({
           rows={3}
           value={instructions}
           onChange={(e) => setInstructions(e.target.value)}
-          placeholder="Напр. лише текстові задачі, без параметрів"
+          placeholder="Напр. лише текстові завдання, без параметрів"
           className={input}
         />
       </label>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium">Кількість задач</span>
+          <span className="font-medium">Рівень / клас (необовʼязково)</span>
+          <input
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            placeholder="Напр. 6 клас або рівень B1"
+            className={input}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Тип завдань (необовʼязково)</span>
+          <input
+            value={taskType}
+            onChange={(e) => setTaskType(e.target.value)}
+            placeholder="Напр. контрольні питання, практичні вправи, тест"
+            className={input}
+          />
+        </label>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Кількість завдань</span>
           <input
             type="number"
             min={1}
@@ -273,31 +317,61 @@ export function TaskGenerator({
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Урок (необовʼязково)</span>
-        <select
-          value={lessonId}
-          onChange={(e) => setLessonId(e.target.value)}
-          className={input}
-        >
-          <option value="">— без уроку —</option>
-          {lessons.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.subject}
-            </option>
-          ))}
-        </select>
-      </label>
+      {lockedLessonId ? (
+        <p className="text-sm">
+          Урок:{" "}
+          <span className="font-medium">
+            {selectedLesson?.subject ?? "—"}
+          </span>
+        </p>
+      ) : (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium">Урок (необовʼязково)</span>
+          <select
+            value={lessonId}
+            onChange={(e) => setLessonId(e.target.value)}
+            className={input}
+          >
+            <option value="">— без уроку —</option>
+            {lessons.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.subject}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       {lessonId ? (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={includeWhiteboard}
-            onChange={(e) => setIncludeWhiteboard(e.target.checked)}
-          />
-          Врахувати текст із дошки цього уроку
-        </label>
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={includeWhiteboard}
+              onChange={(e) => setIncludeWhiteboard(e.target.checked)}
+            />
+            Врахувати дошку цього уроку (текст і малюнки)
+          </label>
+
+          {includeWhiteboard && whiteboardScene ? (
+            <div className="flex flex-col gap-1">
+              <WhiteboardImageCapture
+                scene={whiteboardScene}
+                onCaptured={(url) => {
+                  setBoardImageDataUrl(url);
+                  setBoardImageStatus(url ? "ready" : "empty");
+                }}
+              />
+              <span className="text-muted text-xs">
+                {boardImageStatus === "ready"
+                  ? "Зображення дошки додано до запиту."
+                  : boardImageStatus === "empty"
+                    ? "Дошка порожня — зображення не додано."
+                    : "Захоплюємо дошку як зображення…"}
+              </span>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <label className="flex flex-col gap-1 text-sm">
@@ -323,10 +397,16 @@ export function TaskGenerator({
       <button
         type="button"
         onClick={runGenerate}
-        disabled={pending}
+        disabled={
+          pending || (includeWhiteboard && boardImageStatus === "capturing")
+        }
         className={primaryBtn}
       >
-        {pending ? "Генерація…" : "Згенерувати"}
+        {pending
+          ? "Генерація…"
+          : includeWhiteboard && boardImageStatus === "capturing"
+            ? "Готуємо зображення дошки…"
+            : "Згенерувати"}
       </button>
     </div>
   );

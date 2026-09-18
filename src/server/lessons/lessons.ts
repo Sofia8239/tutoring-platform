@@ -27,6 +27,7 @@ export type LessonPerson = {
 export type LessonDTO = {
   id: string;
   subject: string;
+  disciplineKey: string | null;
   status: LessonStatus;
   scheduledStart: Date;
   scheduledEnd: Date;
@@ -34,6 +35,8 @@ export type LessonDTO = {
   currency: string;
   meetLink: string | null;
   notes: string | null;
+  /** "What happened in the lesson" — see schema.prisma for the notes/summary split. */
+  summary: string | null;
   cancellationReason: string | null;
   completedAt: Date | null;
   cancelledAt: Date | null;
@@ -44,6 +47,8 @@ export type LessonDTO = {
 export type LessonInput = {
   studentId: string;
   subject: string;
+  /** Explicit discipline override; `null`/omitted inherits the teacher's primary. */
+  disciplineKey?: string | null;
   /** UTC instant. */
   scheduledStart: Date;
   /** UTC instant. */
@@ -64,6 +69,7 @@ const LESSON_INCLUDE = {
 type LessonRow = {
   id: string;
   subject: string;
+  disciplineKey: string | null;
   status: LessonStatus;
   scheduledStart: Date;
   scheduledEnd: Date;
@@ -71,6 +77,7 @@ type LessonRow = {
   currency: string;
   meetLink: string | null;
   notes: string | null;
+  summary: string | null;
   cancellationReason: string | null;
   completedAt: Date | null;
   cancelledAt: Date | null;
@@ -82,6 +89,7 @@ function toDTO(row: LessonRow): LessonDTO {
   return {
     id: row.id,
     subject: row.subject,
+    disciplineKey: row.disciplineKey,
     status: row.status,
     scheduledStart: row.scheduledStart,
     scheduledEnd: row.scheduledEnd,
@@ -89,6 +97,7 @@ function toDTO(row: LessonRow): LessonDTO {
     currency: row.currency,
     meetLink: row.meetLink,
     notes: row.notes,
+    summary: row.summary,
     cancellationReason: row.cancellationReason,
     completedAt: row.completedAt,
     cancelledAt: row.cancelledAt,
@@ -105,7 +114,12 @@ export type TeacherLessonScope = "upcoming" | "past" | "all";
 
 export async function listLessonsForTeacher(
   teacherId: string,
-  options: { scope?: TeacherLessonScope; now?: Date } = {},
+  options: {
+    scope?: TeacherLessonScope;
+    now?: Date;
+    /** Restrict to one student — the teacher's view of a single student's cabinet. */
+    studentId?: string;
+  } = {},
 ): Promise<LessonDTO[]> {
   const scope = options.scope ?? "all";
   const now = options.now ?? new Date();
@@ -118,6 +132,7 @@ export async function listLessonsForTeacher(
   const rows = await prisma.lesson.findMany({
     where: {
       teacherId,
+      ...(options.studentId ? { studentId: options.studentId } : {}),
       ...(scope === "upcoming" ? isUpcoming : {}),
       ...(scope === "past" ? { NOT: isUpcoming } : {}),
     },
@@ -265,6 +280,7 @@ export async function createLesson(
       teacherId,
       studentId: input.studentId,
       subject: input.subject.trim(),
+      disciplineKey: input.disciplineKey?.trim() || null,
       scheduledStart: input.scheduledStart,
       scheduledEnd: input.scheduledEnd,
       price: input.price,
@@ -302,6 +318,7 @@ export async function updateLesson(
     data: {
       studentId: input.studentId,
       subject: input.subject.trim(),
+      disciplineKey: input.disciplineKey?.trim() || null,
       scheduledStart: input.scheduledStart,
       scheduledEnd: input.scheduledEnd,
       price: input.price,
@@ -313,6 +330,28 @@ export async function updateLesson(
   });
 
   return toDTO(row);
+}
+
+/**
+ * Set (or clear) "what happened in the lesson" — independent of the full
+ * edit form and not restricted to SCHEDULED lessons, since it's most useful
+ * once a lesson is COMPLETED.
+ */
+export async function updateLessonSummary(
+  teacherId: string,
+  lessonId: string,
+  summary: string | null,
+): Promise<void> {
+  const existing = await prisma.lesson.findFirst({
+    where: { id: lessonId, teacherId },
+    select: { id: true },
+  });
+  if (!existing) throw new LessonValidationError("Урок не знайдено.");
+
+  await prisma.lesson.update({
+    where: { id: lessonId },
+    data: { summary: summary?.trim() || null },
+  });
 }
 
 export async function changeLessonStatus(input: {

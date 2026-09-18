@@ -23,6 +23,7 @@ const ROLE_LABEL: Record<string, string> = {
 const NAV_BY_ROLE: Record<string, NavItem[]> = {
   [UserRole.TEACHER]: [
     { href: "/teacher", label: "Кабінет", icon: "home" },
+    { href: "/teacher/students", label: "Мої учні", icon: "users" },
     { href: "/teacher/lessons", label: "Уроки", icon: "calendar" },
     { href: "/teacher/pages", label: "Сторінки", icon: "file" },
     { href: "/teacher/payments", label: "Платежі", icon: "card" },

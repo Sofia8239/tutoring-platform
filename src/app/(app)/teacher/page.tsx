@@ -7,22 +7,10 @@ import { resolveTenantId } from "@/lib/tenant";
 import { formatMoney } from "@/lib/money";
 import { formatInZone } from "@/lib/datetime";
 import { getUserTimezone } from "@/server/users/users";
-import { displayEmail } from "@/lib/manual-student";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardTitle } from "@/components/ui/card";
 import { StatTile } from "@/components/ui/stat-tile";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Badge } from "@/components/ui/badge";
-import { Icon } from "@/components/ui/icon";
-import {
-  InvitationStatus,
-  LessonStatus,
-  PaymentStatus,
-  UserRole,
-} from "@/generated/prisma/enums";
-
-import { InviteStudentForm } from "./invite-student-form";
-import { AddManualStudentForm } from "./add-manual-student-form";
+import { LessonStatus, PaymentStatus, UserRole } from "@/generated/prisma/enums";
 
 export const metadata: Metadata = { title: "Кабінет викладача" };
 
@@ -31,8 +19,7 @@ export default async function TeacherHomePage() {
   const teacherId = resolveTenantId(user);
 
   const [
-    students,
-    pendingInvites,
+    studentCount,
     upcomingCount,
     completedCount,
     revenue,
@@ -40,15 +27,8 @@ export default async function TeacherHomePage() {
     nextLessons,
     timezone,
   ] = await Promise.all([
-    prisma.user.findMany({
+    prisma.user.count({
       where: { tenantId: teacherId, role: UserRole.STUDENT },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, email: true, isRegistered: true },
-    }),
-    prisma.invitation.findMany({
-      where: { teacherId, status: InvitationStatus.PENDING },
-      orderBy: { createdAt: "desc" },
-      select: { id: true, email: true, expiresAt: true },
     }),
     prisma.lesson.count({
       where: {
@@ -99,11 +79,9 @@ export default async function TeacherHomePage() {
       />
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile
-          label="Учнів"
-          value={String(students.length)}
-          tint="lavender"
-        />
+        <Link href="/teacher/students" className="block transition-opacity hover:opacity-80">
+          <StatTile label="Учнів" value={String(studentCount)} tint="lavender" />
+        </Link>
         <StatTile
           label="Уроків попереду"
           value={String(upcomingCount)}
@@ -162,61 +140,19 @@ export default async function TeacherHomePage() {
         )}
       </Card>
 
-      <Card className="flex flex-col gap-4">
-        <CardTitle>Додати учня</CardTitle>
-        <InviteStudentForm />
-        <div className="border-line border-t pt-4">
-          <AddManualStudentForm />
+      <Card className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <CardTitle>Учні</CardTitle>
+          <Link
+            href="/teacher/students"
+            className="text-muted hover:text-ink text-sm font-medium"
+          >
+            Усі →
+          </Link>
         </div>
-      </Card>
-
-      <Card className="flex flex-col gap-4">
-        <CardTitle>Учні</CardTitle>
-        {students.length === 0 ? (
-          <EmptyState
-            icon={<Icon name="home" className="size-5" />}
-            title="Поки що немає учнів"
-            description="Надішліть посилання-запрошення або додайте учня без облікового запису — лише для обліку."
-          />
-        ) : (
-          <ul className="divide-line divide-y">
-            {students.map((s) => {
-              const email = displayEmail(s.email);
-              return (
-                <li
-                  key={s.id}
-                  className="flex items-center justify-between gap-3 py-2.5 text-sm"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="font-medium">{s.name ?? "—"}</span>
-                    {!s.isRegistered ? (
-                      <Badge tone="neutral">без кабінету</Badge>
-                    ) : null}
-                  </span>
-                  <span className="text-muted shrink-0">{email || "—"}</span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {pendingInvites.length > 0 ? (
-          <div className="border-line flex flex-col gap-1 border-t pt-3">
-            <span className="text-muted text-xs font-medium">
-              Активні запрошення
-            </span>
-            {pendingInvites.map((inv) => (
-              <div
-                key={inv.id}
-                className="flex items-center justify-between text-sm"
-              >
-                <span>{inv.email}</span>
-                <span className="text-muted">
-                  до {inv.expiresAt.toLocaleDateString("uk-UA")}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        <p className="text-muted text-sm">
+          Додати учня, переглянути кабінет кожного — на вкладці «Мої учні».
+        </p>
       </Card>
     </div>
   );
